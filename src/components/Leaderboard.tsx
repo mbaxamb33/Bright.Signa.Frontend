@@ -553,7 +553,7 @@ export function Leaderboard() {
 
           {/* Rankings Table */}
           <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
-            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="p-3 sm:p-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="font-medium text-gray-900">Rankings</h3>
               <span className="text-sm text-gray-500">{leaderboardData.length} participants</span>
             </div>
@@ -561,14 +561,14 @@ export function Leaderboard() {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rank</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Achievement</th>
+                    <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12 sm:w-auto">#</th>
+                    <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
+                    <th className="hidden sm:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
+                    <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
                     {isSingleMonth && (
                       <>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trend</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Streak</th>
+                        <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trend</th>
+                        <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Streak</th>
                       </>
                     )}
                   </tr>
@@ -576,49 +576,53 @@ export function Leaderboard() {
                 <tbody className="divide-y divide-gray-100">
                   {leaderboardData.map((row) => (
                     <tr key={row.user_id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-4">
-                        <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${getRankColor(row.rank)} flex items-center justify-center text-white font-semibold shadow-sm`}>
-                          <span className={row.rank <= 3 ? 'text-lg' : 'text-sm'}>{getRankIcon(row.rank)}</span>
+                      <td className="px-2 sm:px-4 py-3 sm:py-4">
+                        <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br ${getRankColor(row.rank)} flex items-center justify-center text-white font-semibold shadow-sm`}>
+                          <span className={row.rank <= 3 ? 'text-base sm:text-lg' : 'text-xs sm:text-sm'}>{getRankIcon(row.rank)}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
-                            <span className="text-white text-sm font-medium">{row.user_name.charAt(0).toUpperCase()}</span>
+                      <td className="px-2 sm:px-4 py-3 sm:py-4">
+                        <div className="flex items-center gap-2 sm:gap-3">
+                          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center flex-shrink-0">
+                            <span className="text-white text-xs sm:text-sm font-medium">{row.user_name.charAt(0).toUpperCase()}</span>
                           </div>
-                          <span className="font-medium text-gray-900">{row.user_name}</span>
+                          <div className="min-w-0">
+                            <span className="font-medium text-gray-900 text-sm sm:text-base truncate block">{row.user_name}</span>
+                            {/* Show score on mobile below name */}
+                            <span className="sm:hidden text-xs text-gray-500">{row.score.toFixed(0)} pts</span>
+                          </div>
                         </div>
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="hidden sm:table-cell px-4 py-4">
                         <span className="font-semibold text-gray-900">{row.score.toFixed(0)}</span>
                       </td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-24 h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <td className="px-2 sm:px-4 py-3 sm:py-4">
+                        <div className="flex items-center gap-2 sm:gap-3">
+                          <div className="w-16 sm:w-24 h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div
                               className={`h-full bg-gradient-to-r ${getProgressColor(row.achievement_pct)} rounded-full`}
                               style={{ width: `${Math.min(row.achievement_pct, 100)}%` }}
                             />
                           </div>
-                          <span className={`text-sm font-medium ${
+                          <span className={`text-xs sm:text-sm font-medium whitespace-nowrap ${
                             row.achievement_pct >= 100 ? 'text-emerald-600' :
                             row.achievement_pct >= 75 ? 'text-teal-600' :
                             row.achievement_pct >= 50 ? 'text-amber-600' :
                             'text-red-600'
                           }`}>
-                            {row.achievement_pct.toFixed(1)}%
+                            {row.achievement_pct.toFixed(0)}%
                           </span>
                         </div>
                       </td>
                       {isSingleMonth && (
                         <>
-                          <td className="px-4 py-4">
+                          <td className="hidden md:table-cell px-4 py-4">
                             <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${getTrendStyle(row.trend)}`}>
                               {getTrendIcon(row.trend)}
                               <span className="capitalize">{row.trend === 'flat' ? 'Stable' : row.trend === 'up' ? 'Rising' : 'Falling'}</span>
                             </div>
                           </td>
-                          <td className="px-4 py-4">
+                          <td className="hidden md:table-cell px-4 py-4">
                             {row.streak_days > 0 ? (
                               <div className="flex items-center gap-2">
                                 <Flame className="w-4 h-4 text-orange-500" />

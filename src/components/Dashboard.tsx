@@ -210,9 +210,9 @@ export function Dashboard() {
             )}
           </div>
 
-          {/* Visual day grid */}
+          {/* Visual day grid - hidden on mobile, shown on sm+ */}
           <div
-            className="grid gap-0.5 mb-3"
+            className="hidden sm:grid gap-0.5 mb-3"
             style={{ gridTemplateColumns: `repeat(${daysInfo.daysInMonth}, 1fr)` }}
           >
             {Array.from({ length: daysInfo.daysInMonth }).map((_, i) => {

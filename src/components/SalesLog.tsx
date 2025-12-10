@@ -198,17 +198,17 @@ function Toast({
   }, [duration, onClose]);
 
   return (
-    <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
-      <div className="bg-gray-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 min-w-[280px]">
+    <div className="fixed bottom-24 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-50 animate-slide-up">
+      <div className="bg-gray-900 text-white px-3 sm:px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 sm:gap-3 sm:min-w-[280px]">
         <Check className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-        <span className="flex-1 text-sm font-medium">{message}</span>
+        <span className="flex-1 text-sm font-medium truncate">{message}</span>
         {onUndo && (
           <button
             onClick={onUndo}
-            className="flex items-center gap-1 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-semibold transition-colors"
+            className="flex items-center gap-1 px-2 sm:px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-semibold transition-colors flex-shrink-0"
           >
             <Undo2 className="w-4 h-4" />
-            Undo
+            <span className="hidden sm:inline">Undo</span>
           </button>
         )}
         <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20 rounded-b-2xl overflow-hidden">
@@ -220,8 +220,8 @@ function Toast({
       </div>
       <style>{`
         @keyframes slide-up {
-          from { transform: translate(-50%, 100%); opacity: 0; }
-          to { transform: translate(-50%, 0); opacity: 1; }
+          from { transform: translateY(100%); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
         .animate-slide-up {
           animation: slide-up 0.3s ease-out forwards;

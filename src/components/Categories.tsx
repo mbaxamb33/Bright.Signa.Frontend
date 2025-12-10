@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Plus, Trash2, FolderTree } from 'lucide-react';
 import { useCategories, useInvalidateBootstrap } from '../contexts/BootstrapContext';
+import { useShop } from '../contexts/ShopContext';
 import { Category, createCategory, deleteCategory } from '../lib/api';
 
 export function Categories() {
   const { categories, loading } = useCategories();
+  const { currentShopId } = useShop();
   const invalidateBootstrap = useInvalidateBootstrap();
   const [error, setError] = useState<string | null>(null);
 
@@ -25,12 +27,12 @@ export function Categories() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim()) return;
+    if (!formName.trim() || !currentShopId) return;
 
     setSubmitting(true);
     setError(null);
     try {
-      const created = await createCategory({
+      const created = await createCategory(currentShopId, {
         name: formName.trim(),
         unit: formUnit,
         parent_id: formParentId || null,
@@ -49,10 +51,11 @@ export function Categories() {
   };
 
   const handleDelete = async (id: string) => {
+    if (!currentShopId) return;
     setDeleting(true);
     setError(null);
     try {
-      await deleteCategory(id);
+      await deleteCategory(currentShopId, id);
       setDeleteId(null);
       await fetchCategories();
     } catch (err: any) {

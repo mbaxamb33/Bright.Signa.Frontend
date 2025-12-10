@@ -158,9 +158,9 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div className="flex h-screen bg-slate-50 overflow-hidden">
       <Sidebar currentView={currentView} onViewChange={setCurrentView} />
-      <main className="flex-1 overflow-y-auto pt-16 lg:pt-0">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden pt-16 lg:pt-0">
         <Suspense fallback={<PageLoader />}>
           {renderView()}
         </Suspense>

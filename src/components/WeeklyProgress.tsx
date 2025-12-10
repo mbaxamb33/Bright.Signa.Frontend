@@ -572,22 +572,22 @@ export function WeeklyProgress() {
                             </div>
 
                             {/* Stats */}
-                            <div className="grid grid-cols-3 gap-2 text-center">
-                              <div className="bg-white rounded-lg p-2">
-                                <p className="text-xs text-gray-500 mb-0.5">Target</p>
-                                <p className="font-semibold text-purple-700 text-sm">
+                            <div className="flex flex-wrap gap-2 text-center">
+                              <div className="bg-white rounded-lg p-2 flex-1 min-w-[60px]">
+                                <p className="text-[10px] sm:text-xs text-gray-500 mb-0.5">Target</p>
+                                <p className="font-semibold text-purple-700 text-xs sm:text-sm truncate">
                                   {formatValue(cat.target, unit)}
                                 </p>
                               </div>
-                              <div className="bg-white rounded-lg p-2">
-                                <p className="text-xs text-gray-500 mb-0.5">Achieved</p>
-                                <p className="font-semibold text-cyan-700 text-sm">
+                              <div className="bg-white rounded-lg p-2 flex-1 min-w-[60px]">
+                                <p className="text-[10px] sm:text-xs text-gray-500 mb-0.5">Achieved</p>
+                                <p className="font-semibold text-cyan-700 text-xs sm:text-sm truncate">
                                   {formatValue(cat.achieved, unit)}
                                 </p>
                               </div>
-                              <div className="bg-white rounded-lg p-2">
-                                <p className="text-xs text-gray-500 mb-0.5">Remaining</p>
-                                <p className={`font-semibold text-sm ${cat.target - cat.achieved > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                              <div className="bg-white rounded-lg p-2 flex-1 min-w-[60px]">
+                                <p className="text-[10px] sm:text-xs text-gray-500 mb-0.5">Remaining</p>
+                                <p className={`font-semibold text-xs sm:text-sm truncate ${cat.target - cat.achieved > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
                                   {formatValue(Math.max(0, cat.target - cat.achieved), unit)}
                                 </p>
                               </div>
@@ -690,7 +690,7 @@ export function WeeklyProgress() {
                                     style={{ width: `${Math.min(completionMetrics.separate.quantity.percentage, 100)}%` }}
                                   />
                                 </div>
-                                <div className="flex justify-between text-xs text-gray-600">
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
                                   <span>Target: <span className="font-semibold text-purple-700">{completionMetrics.separate.quantity.target.toFixed(0)}</span></span>
                                   <span>Achieved: <span className="font-semibold text-cyan-700">{completionMetrics.separate.quantity.achieved.toFixed(0)}</span></span>
                                   <span>Remaining: <span className={`font-semibold ${completionMetrics.separate.quantity.target - completionMetrics.separate.quantity.achieved > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
@@ -726,7 +726,7 @@ export function WeeklyProgress() {
                                     style={{ width: `${Math.min(completionMetrics.separate.currency.percentage, 100)}%` }}
                                   />
                                 </div>
-                                <div className="flex justify-between text-xs text-gray-600">
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
                                   <span>Target: <span className="font-semibold text-purple-700">{formatValue(completionMetrics.separate.currency.target, 'currency')}</span></span>
                                   <span>Achieved: <span className="font-semibold text-cyan-700">{formatValue(completionMetrics.separate.currency.achieved, 'currency')}</span></span>
                                   <span>Remaining: <span className={`font-semibold ${completionMetrics.separate.currency.target - completionMetrics.separate.currency.achieved > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>

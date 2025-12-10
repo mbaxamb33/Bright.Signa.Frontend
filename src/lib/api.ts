@@ -224,25 +224,26 @@ export type Category = {
   sort_order?: number | null;
 };
 
-export async function listCategories(parentId?: string): Promise<Category[]> {
+export async function listCategories(shopId: string, parentId?: string): Promise<Category[]> {
   const q = parentId ? `?parent_id=${encodeURIComponent(parentId)}` : '';
-  return apiFetch<Category[]>(`/categories${q}`);
+  return apiFetch<Category[]>(`/shops/${encodeURIComponent(shopId)}/categories${q}`);
 }
 
-export async function createCategory(input: {
+export async function createCategory(shopId: string, input: {
   name: string;
   unit: 'count' | 'currency';
   parent_id?: string | null;
   weight?: string | null;
   sort_order?: number | null;
 }): Promise<Category> {
-  return apiFetch<Category>('/categories', {
+  return apiFetch<Category>(`/shops/${encodeURIComponent(shopId)}/categories`, {
     method: 'POST',
     body: JSON.stringify(input),
   });
 }
 
 export async function updateCategory(
+  shopId: string,
   id: string,
   input: Partial<{
     name: string;
@@ -252,14 +253,14 @@ export async function updateCategory(
     sort_order: number | null;
   }>
 ): Promise<Category> {
-  return apiFetch<Category>(`/categories/${encodeURIComponent(id)}`, {
+  return apiFetch<Category>(`/shops/${encodeURIComponent(shopId)}/categories/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
   });
 }
 
-export async function deleteCategory(id: string): Promise<void> {
-  await apiFetch<void>(`/categories/${encodeURIComponent(id)}`, {
+export async function deleteCategory(shopId: string, id: string): Promise<void> {
+  await apiFetch<void>(`/shops/${encodeURIComponent(shopId)}/categories/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
 }
