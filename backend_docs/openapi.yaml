@@ -1,0 +1,935 @@
+openapi: 3.0.3
+info:
+  title: BrightSigma Backend API
+  version: 0.1.0
+  description: |
+    BrightSigma HTTP API for shops, invitations, categories, periods, targets, achievements, and leaderboards.
+
+    Authentication: Supabase JWT Bearer tokens. The `sub` claim (UUID) is used as `users.id` in the database.
+
+    Authorization: Shop-scoped roles via `shop_memberships` table (owner, manager, sales_junior, sales_senior).
+
+    Integrity rules (enforced in Postgres):
+    - Weekly distribution sum per period: iterative updates must not exceed 100%; publish/lock requires exactly 100%.
+    - Weekly role weights sum per (period, week): iterative updates must not exceed 100%; publish/lock requires exactly 100%.
+    - Categories are acyclic via trigger.
+    - Config changes set a `period_recalc_flags` row; recompute endpoint materializes `user_week_targets` and clears the flag.
+
+    Timezone handling: Daily reporting uses shop timezone; for raw events the API expects clients to provide correct local dates when using `user_daily_achievements`.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Health
+  - name: Users
+  - name: Shops
+  - name: Invitations
+  - name: Categories
+  - name: Periods
+  - name: Targets
+  - name: Achievements
+  - name: Leaderboard
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      responses:
+        '200': { $ref: '#/components/responses/OkStatus' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /readyz:
+    get:
+      tags: [Health]
+      summary: Readiness probe (DB ping)
+      responses:
+        '200': { $ref: '#/components/responses/ReadyStatus' }
+        '503': { $ref: '#/components/responses/Unready' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /me:
+    get:
+      tags: [Users]
+      security: [{ BearerAuth: [] }]
+      summary: Return current user id from token
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /me/bootstrap:
+    post:
+      tags: [Users]
+      security: [{ BearerAuth: [] }]
+      summary: Ensure a users row exists for current token (id=sub)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/User' }
+        '400': { $ref: '#/components/responses/InvalidPayload' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/shops:
+    get:
+      tags: [Shops]
+      security: [{ BearerAuth: [] }]
+      summary: List shops for current user
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Shops
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Shop' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Shops]
+      security: [{ BearerAuth: [] }]
+      summary: Create a shop and assign caller as owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, timezone]
+              properties:
+                name: { type: string }
+                timezone: { type: string, description: IANA timezone, example: Europe/Bucharest }
+      responses:
+        '200': { $ref: '#/components/responses/Shop' }
+        '400': { $ref: '#/components/responses/InvalidPayload' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/shops/{shop_id}:
+    parameters:
+      - $ref: '#/components/parameters/ShopID'
+    get:
+      tags: [Shops]
+      security: [{ BearerAuth: [] }]
+      summary: Get a shop (membership required)
+      responses:
+        '200': { $ref: '#/components/responses/Shop' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ShopNotFound' }
+    patch:
+      tags: [Shops]
+      security: [{ BearerAuth: [] }]
+      summary: Update shop (owner/manager)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                timezone: { type: string }
+                active: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/Shop' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ShopNotFound' }
+
+  /api/v1/shops/{shop_id}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/ShopID'
+    get:
+      tags: [Invitations]
+      security: [{ BearerAuth: [] }]
+      summary: List pending invitations (owner/manager)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Invitations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Invitation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Invitations]
+      security: [{ BearerAuth: [] }]
+      summary: Create invitation (owner/manager)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invited_email, role]
+              properties:
+                invited_email: { type: string, format: email }
+                role:
+                  type: string
+                  enum: [owner, manager, sales_junior, sales_senior]
+                expires_in_days: { type: integer, minimum: 1, maximum: 60, default: 7 }
+      responses:
+        '200': { $ref: '#/components/responses/Invitation' }
+        '400': { $ref: '#/components/responses/InvalidPayload' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/invitations/{token}/accept:
+    post:
+      tags: [Invitations]
+      security: [{ BearerAuth: [] }]
+      summary: Accept an invitation; membership created for current user
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Invitation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/InvalidToken' }
+
+  /api/v1/invitations/{token}/revoke:
+    post:
+      tags: [Invitations]
+      security: [{ BearerAuth: [] }]
+      summary: Revoke an invitation (owner/manager of the invite's shop)
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Invitation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/InvalidToken' }
+
+  /api/v1/categories:
+    get:
+      tags: [Categories]
+      security: [{ BearerAuth: [] }]
+      summary: List categories (optionally filter by parent_id)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - in: query
+          name: parent_id
+          schema: { type: string }
+          description: If omitted returns only top-level categories
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+    post:
+      tags: [Categories]
+      security: [{ BearerAuth: [] }]
+      summary: Create category (owner/manager in any shop)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, unit]
+              properties:
+                id: { type: string, description: Optional custom ID; if omitted a short id is generated }
+                name: { type: string }
+                unit: { type: string, enum: [count, currency] }
+                parent_id: { type: string, nullable: true }
+                weight: { type: string, description: Decimal string, e.g. "1.00" }
+                sort_order: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/Category' }
+        '400': { $ref: '#/components/responses/InvalidPayload' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/categories/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Categories]
+      security: [{ BearerAuth: [] }]
+      summary: Get category
+      responses:
+        '200': { $ref: '#/components/responses/Category' }
+        '404': { $ref: '#/components/responses/CategoryNotFound' }
+    patch:
+      tags: [Categories]
+      security: [{ BearerAuth: [] }]
+      summary: Update category (owner/manager)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                unit: { type: string, enum: [count, currency] }
+                parent_id: { type: string, nullable: true }
+                weight: { type: string }
+                sort_order: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/Category' }
+        '400': { $ref: '#/components/responses/InvalidPayload' }
+        '404': { $ref: '#/components/responses/CategoryNotFound' }
+
+  /api/v1/shops/{shop_id}/periods:
+    parameters:
+      - $ref: '#/components/parameters/ShopID'
+    get:
+      tags: [Periods]
+      security: [{ BearerAuth: [] }]
+      summary: List periods for a shop
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Periods
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Period' }
+    post:
+      tags: [Periods]
+      security: [{ BearerAuth: [] }]
+      summary: Create period (owner/manager); auto-slices weeks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [year, month]
+              properties:
+                year: { type: integer, minimum: 2000 }
+                month: { type: integer, minimum: 1, maximum: 12 }
+      responses:
+        '200': { $ref: '#/components/responses/Period' }
+        '400': { $ref: '#/components/responses/InvalidPayload' }
+
+  /api/v1/periods/{period_id}:
+    parameters:
+      - $ref: '#/components/parameters/PeriodID'
+    get:
+      tags: [Periods]
+      security: [{ BearerAuth: [] }]
+      summary: Get a period; include weeks with `?include_weeks=true`
+      parameters:
+        - in: query
+          name: include_weeks
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Period (and weeks if requested)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Period'
+                  - type: object
+                    properties:
+                      period: { $ref: '#/components/schemas/Period' }
+                      weeks:
+                        type: array
+                        items: { $ref: '#/components/schemas/PeriodWeek' }
+        '404': { $ref: '#/components/responses/PeriodNotFound' }
+
+  /api/v1/periods/{period_id}/weeks:
+    parameters:
+      - $ref: '#/components/parameters/PeriodID'
+    get:
+      tags: [Periods]
+      security: [{ BearerAuth: [] }]
+      summary: List weeks for a period
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Period weeks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PeriodWeek' }
+
+  /api/v1/periods/{period_id}/status:
+    parameters:
+      - $ref: '#/components/parameters/PeriodID'
+    patch:
+      tags: [Periods]
+      security: [{ BearerAuth: [] }]
+      summary: Update period status (owner/manager); publish/lock will be validated
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [draft, published, locked, archived] }
+      responses:
+        '200': { $ref: '#/components/responses/Period' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/periods/{period_id}/targets:
+    parameters:
+      - $ref: '#/components/parameters/PeriodID'
+    get:
+      tags: [Targets]
+      security: [{ BearerAuth: [] }]
+      summary: List monthly targets for a period
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Monthly targets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ShopMonthTarget' }
+    put:
+      tags: [Targets]
+      security: [{ BearerAuth: [] }]
+      summary: Upsert monthly targets (owner/manager)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                required: [category_id, target_value]
+                properties:
+                  category_id: { type: string }
+                  target_value: { type: string, description: Decimal string with 2 decimals }
+      responses:
+        '200':
+          description: Updated targets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ShopMonthTarget' }
+
+  /api/v1/periods/{period_id}/weekly-distribution:
+    parameters:
+      - $ref: '#/components/parameters/PeriodID'
+    get:
+      tags: [Targets]
+      security: [{ BearerAuth: [] }]
+      summary: List weekly distribution percentages for a period
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Weekly distribution
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WeeklyDistribution' }
+    put:
+      tags: [Targets]
+      security: [{ BearerAuth: [] }]
+      summary: Upsert weekly distribution (owner/manager)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                required: [week_index, percentage]
+                properties:
+                  week_index: { type: integer, minimum: 1 }
+                  percentage: { type: string, description: Decimal string percent with 2 decimals }
+      responses:
+        '200':
+          description: Updated weekly distribution
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WeeklyDistribution' }
+
+  /api/v1/periods/{period_id}/role-weights/{week_index}:
+    parameters:
+      - $ref: '#/components/parameters/PeriodID'
+      - in: path
+        name: week_index
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Targets]
+      security: [{ BearerAuth: [] }]
+      summary: List weekly role weights for a period/week
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Weekly role weights
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WeeklyRoleWeight' }
+    put:
+      tags: [Targets]
+      security: [{ BearerAuth: [] }]
+      summary: Upsert weekly role weights (owner/manager)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                required: [role, weight_percentage]
+                properties:
+                  role: { type: string, enum: [owner, manager, sales_junior, sales_senior] }
+                  weight_percentage: { type: string, description: Decimal string percent with 2 decimals }
+      responses:
+        '200':
+          description: Updated weekly role weights
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WeeklyRoleWeight' }
+
+  /api/v1/periods/{period_id}/recompute:
+    parameters:
+      - $ref: '#/components/parameters/PeriodID'
+    post:
+      tags: [Targets]
+      security: [{ BearerAuth: [] }]
+      summary: Recompute user_week_targets for a period (owner/manager)
+      description: |
+        Idempotent. Clears existing user_week_targets for the period, recomputes per-user targets from monthly targets, weekly distribution, and role weights,
+        splits evenly across active members per role, distributes remainder deterministically, and clears the period_recalc_flags row.
+      responses:
+        '200': { $ref: '#/components/responses/OkStatus' }
+
+  /api/v1/shops/{shop_id}/achievements:
+    parameters:
+      - $ref: '#/components/parameters/ShopID'
+    post:
+      tags: [Achievements]
+      security: [{ BearerAuth: [] }]
+      summary: Upsert daily achievements (bulk)
+      description: |
+        sales_* roles may only write their own entries; owner/manager can write for any user of the shop.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                required: [category_id, occurred_on, achieved_value]
+                properties:
+                  user_id: { type: string, format: uuid, description: Defaults to caller if omitted }
+                  category_id: { type: string }
+                  occurred_on: { type: string, format: date }
+                  achieved_value: { type: string, description: Decimal string with 2 decimals }
+                  source: { type: string, enum: [manual, import, api], default: manual }
+      responses:
+        '200': { $ref: '#/components/responses/OkStatus' }
+        '400': { $ref: '#/components/responses/InvalidPayload' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/users/{user_id}/achievements:
+    parameters:
+      - $ref: '#/components/parameters/UserID'
+    get:
+      tags: [Achievements]
+      security: [{ BearerAuth: [] }]
+      summary: List a user's daily achievements for a date range
+      parameters:
+        - in: query
+          name: start
+          required: true
+          schema: { type: string, format: date }
+        - in: query
+          name: end
+          required: true
+          schema: { type: string, format: date }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Achievements
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UserDailyAchievement' }
+
+  /api/v1/periods/{period_id}/leaderboard:
+    parameters:
+      - $ref: '#/components/parameters/PeriodID'
+    get:
+      tags: [Leaderboard]
+      security: [{ BearerAuth: [] }]
+      summary: List leaderboard snapshots for a period
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LeaderboardSnapshot' }
+
+  /api/v1/periods/{period_id}/leaderboard/snapshots:
+    parameters:
+      - $ref: '#/components/parameters/PeriodID'
+    post:
+      tags: [Leaderboard]
+      security: [{ BearerAuth: [] }]
+      summary: Compute or refresh leaderboard snapshot for period (rules v1)
+      responses:
+        '200': { $ref: '#/components/responses/LeaderboardSnapshot' }
+
+  /api/v1/leaderboard/snapshots/{snapshot_id}:
+    parameters:
+      - in: path
+        name: snapshot_id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Leaderboard]
+      security: [{ BearerAuth: [] }]
+      summary: List leaderboard rows for snapshot
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Leaderboard rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LeaderboardRow' }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ShopID:
+      in: path
+      name: shop_id
+      required: true
+      schema: { type: string, format: uuid }
+    PeriodID:
+      in: path
+      name: period_id
+      required: true
+      schema: { type: string, format: uuid }
+    UserID:
+      in: path
+      name: user_id
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      in: query
+      name: limit
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      in: query
+      name: offset
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  responses:
+    OkStatus:
+      description: OK status
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, example: ok }
+    ReadyStatus:
+      description: Ready
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, example: ready }
+    Unready:
+      description: Service not ready
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    MethodNotAllowed:
+      description: Method not allowed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidPayload:
+      description: Invalid payload
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidToken:
+      description: Invalid invitation token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ShopNotFound:
+      description: Shop not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    CategoryNotFound:
+      description: Category not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PeriodNotFound:
+      description: Period not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    User:
+      description: User
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/User' }
+    Shop:
+      description: Shop
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Shop' }
+    Invitation:
+      description: Invitation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Invitation' }
+    Category:
+      description: Category
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Category' }
+    Period:
+      description: Period
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Period' }
+    LeaderboardSnapshot:
+      description: Leaderboard Snapshot
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/LeaderboardSnapshot' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        code: { type: string }
+
+    User:
+      type: object
+      description: users table row (subset exposed)
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string, nullable: true }
+        status: { type: string, enum: [active, disabled, pending] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Shop:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        timezone: { type: string }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Invitation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        shop_id: { type: string, format: uuid }
+        invited_email: { type: string, format: email }
+        role: { type: string, enum: [owner, manager, sales_junior, sales_senior] }
+        invited_by_user_id: { type: string, format: uuid }
+        token: { type: string }
+        status: { type: string, enum: [pending, accepted, revoked, expired] }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Category:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        unit: { type: string, enum: [count, currency] }
+        parent_id: { type: string, nullable: true }
+        weight: { type: string, description: Decimal string }
+        sort_order: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Period:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        shop_id: { type: string, format: uuid }
+        year: { type: integer }
+        month: { type: integer }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        status: { type: string, enum: [draft, published, locked, archived] }
+        locked_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    PeriodWeek:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        period_id: { type: string, format: uuid }
+        week_index: { type: integer }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        day_count: { type: integer }
+
+    ShopMonthTarget:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        period_id: { type: string, format: uuid }
+        category_id: { type: string }
+        target_value: { type: string, description: Decimal string with 2 decimals }
+
+    WeeklyDistribution:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        period_id: { type: string, format: uuid }
+        week_index: { type: integer }
+        percentage: { type: string, description: Decimal string with 2 decimals }
+
+    WeeklyRoleWeight:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        period_id: { type: string, format: uuid }
+        week_index: { type: integer }
+        role: { type: string, enum: [owner, manager, sales_junior, sales_senior] }
+        weight_percentage: { type: string, description: Decimal string with 2 decimals }
+
+    UserDailyAchievement:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        shop_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        category_id: { type: string }
+        occurred_on: { type: string, format: date }
+        achieved_value: { type: string, description: Decimal string with 2 decimals }
+        source: { type: string, enum: [manual, import, api] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    LeaderboardSnapshot:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        period_id: { type: string, format: uuid }
+        computed_at: { type: string, format: date-time }
+        rules_version: { type: string }
+
+    LeaderboardRow:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        snapshot_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        rank: { type: integer }
+        score: { type: string, description: Score as decimal string (percentage) }
+        achievement_pct: { type: string, description: Percentage achieved as decimal string }
+        trend: { type: string, enum: [up, down, flat] }
+        streak_days: { type: integer }
+
